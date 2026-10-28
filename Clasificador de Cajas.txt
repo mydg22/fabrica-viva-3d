@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fábrica Viva · Lección 1: El Clasificador de Cajas</title>
+<style>
+  :root{
+    --paper:#f2e9d8; --paper2:#e9dcc4; --ink:#2a2620; --ink2:#5a5244;
+    --accent:#e0762c; --cyan:#2ec4b6; --amber:#f4a53f; --line:rgba(42,38,32,.35);
+    --panel:#faf4e6;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    background:var(--paper); color:var(--ink);
+  }
+  /* ---------- Loader ---------- */
+  #loader{
+    position:fixed; inset:0; z-index:100; background:var(--paper);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; transition:opacity .8s ease; text-align:center; padding:24px;
+  }
+  #loader.hide{opacity:0; pointer-events:none}
+  #loader .book{
+    width:84px; height:60px; border:2px solid var(--ink); border-radius:2px 10px 10px 2px;
+    background:linear-gradient(90deg,var(--paper2) 50%,var(--panel) 50%);
+    position:relative; animation:openBook 2.2s ease infinite; transform-style:preserve-3d;
+    box-shadow:0 8px 24px rgba(42,38,32,.25);
+  }
+  @keyframes openBook{0%,100%{transform:perspective(400px) rotateY(0)}50%{transform:perspective(400px) rotateY(-18deg)}}
+  #loader h1{font-size:1.5rem; letter-spacing:.04em}
+  #loader h2{font-size:1rem; font-weight:400; color:var(--ink2); font-style:italic}
+  #loader .bar{width:220px; height:4px; background:rgba(42,38,32,.15); border-radius:4px; overflow:hidden}
+  #loader .bar i{display:block; height:100%; width:30%; background:var(--accent); animation:load 1.2s ease-in-out infinite alternate; border-radius:4px}
+  @keyframes load{from{transform:translateX(-60%)}to{transform:translateX(320%)}}
+
+  /* ---------- Header ---------- */
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 18px; background:linear-gradient(var(--panel),rgba(250,244,230,.85));
+    border-bottom:1px solid var(--line); backdrop-filter:blur(4px);
+  }
+  header .titles h1{font-size:1.02rem; letter-spacing:.03em}
+  header .titles h2{font-size:.78rem; font-weight:400; font-style:italic; color:var(--ink2)}
+  #stamp{
+    width:58px; height:58px; border:2.5px dashed rgba(42,38,32,.3); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-size:.5rem; line-height:1.15; color:rgba(42,38,32,.35); transform:rotate(-12deg);
+    transition:all .6s cubic-bezier(.2,1.6,.4,1); cursor:default; user-select:none;
+  }
+  #stamp.earned{
+    border-color:#a33327; color:#a33327; background:rgba(224,118,44,.08);
+    animation:stampIn .7s cubic-bezier(.2,2,.4,1);
+  }
+  @keyframes stampIn{0%{transform:scale(2.4) rotate(-30deg); opacity:0}100%{transform:scale(1) rotate(-12deg); opacity:1}}
+
+  /* ---------- Status bar ---------- */
+  #statusbar{
+    position:fixed; top:66px; left:0; right:0; z-index:19;
+    display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center;
+    padding:6px 18px; font-size:.72rem; color:var(--ink2);
+    background:rgba(242,233,216,.7); border-bottom:1px dashed var(--line);
+  }
+  #statusbar b{color:var(--ink); font-weight:600}
+  #statusbar .state{padding:2px 10px; border:1px solid var(--line); border-radius:12px; background:var(--panel)}
+  #statusbar .state.predict{border-color:var(--cyan); color:#0c7a70}
+
+  /* ---------- 3D scene ---------- */
+  #scene{position:fixed; inset:0; top:0}
+  #grain{position:fixed; inset:0; z-index:15; pointer-events:none; opacity:.06;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");}
+  #hint{position:fixed; z-index:16; right:14px; bottom:212px; font-size:.68rem; color:var(--ink2);
+    font-style:italic; pointer-events:none; text-align:right}
+
+  /* ---------- Bottom panel ---------- */
+  #panel{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    background:linear-gradient(rgba(250,244,230,.97),var(--panel));
+    border-top:2px solid var(--ink); padding:10px 16px 12px;
+    max-height:200px; overflow-y:auto;
+  }
+  #panel .lesson{font-size:.8rem; line-height:1.45; color:var(--ink2); margin-bottom:8px}
+  #panel .lesson b{color:var(--ink)}
+  .controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  button{
+    font-family:inherit; font-size:.76rem; padding:7px 13px; border-radius:8px; cursor:pointer;
+    border:1.5px solid var(--ink); background:var(--panel); color:var(--ink);
+    transition:all .18s; letter-spacing:.02em;
+  }
+  button:hover{background:var(--ink); color:var(--paper); transform:translateY(-1px)}
+  button.primary{background:var(--ink); color:var(--paper)}
+  button.primary:hover{background:#4a4336}
+  button.accent{border-color:var(--accent); color:var(--accent)}
+  button.accent:hover{background:var(--accent); color:#fff}
+  button.flap{border-color:#0c7a70; color:#0c7a70}
+  button.flap:hover{background:#0c7a70; color:#fff}
+  button:disabled{opacity:.4; pointer-events:none}
+  .sliders{display:flex; gap:14px; flex-wrap:wrap; font-size:.72rem; color:var(--ink2); align-items:center}
+  .sliders label{display:flex; gap:6px; align-items:center}
+  input[type=range]{accent-color:var(--accent); width:110px}
+  #predictbox{
+    margin-top:8px; padding:9px 12px; border:1.5px dashed var(--cyan); border-radius:10px;
+    background:rgba(46,196,182,.06); font-size:.76rem; display:none; animation:fadeIn .4s ease;
+  }
+  #predictbox.show{display:block}
+  @keyframes fadeIn{from{opacity:0; transform:translateY(6px)}to{opacity:1}}
+  #predictbox .pbtns{display:flex; gap:8px; margin-top:8px}
+  #toast{
+    position:fixed; top:96px; left:50%; transform:translateX(-50%); z-index:40;
+    padding:8px 18px; border-radius:20px; background:var(--ink); color:var(--paper);
+    font-size:.76rem; opacity:0; transition:opacity .3s; pointer-events:none;
+  }
+  #toast.show{opacity:.95}
+
+  /* ---------- Flap ---------- */
+  #flap{
+    position:fixed; top:66px; right:0; bottom:202px; width:min(380px,92vw); z-index:30;
+    background:var(--panel); border-left:2px solid var(--ink); border-bottom-left-radius:14px;
+    box-shadow:-12px 0 30px rgba(42,38,32,.18);
+    transform:translateX(105%); transition:transform .55s cubic-bezier(.3,1,.3,1);
+    overflow-y:auto; padding:16px 18px 24px;
+  }
+  #flap.open{transform:translateX(0)}
+  #flap h3{font-size:.95rem; margin-bottom:6px}
+  #flap h4{font-size:.78rem; margin:12px 0 4px; color:var(--accent)}
+  #flap p, #flap li{font-size:.78rem; line-height:1.5; color:var(--ink2)}
+  #flap ul{padding-left:18px; margin:4px 0}
+  #flap pre{
+    background:#241f18; color:#e8dcc4; font-size:.68rem; line-height:1.5;
+    padding:12px; border-radius:8px; overflow-x:auto; margin-top:6px;
+    font-family:"SF Mono",Consolas,Menlo,monospace;
+  }
+  #flap .formula{
+    text-align:center; font-size:1rem; font-style:italic; margin:8px 0;
+    padding:8px; border:1px dashed var(--line); border-radius:8px; background:rgba(233,220,196,.5);
+  }
+  #flap .closeflap{
+    position:absolute; top:10px; right:12px; border:none; font-size:1rem; padding:2px 8px;
+  }
+  #flapHandle{
+    position:fixed; top:50%; right:0; z-index:29; writing-mode:vertical-rl;
+    background:var(--ink); color:var(--paper); font-size:.7rem; padding:14px 8px;
+    border-radius:10px 0 0 10px; cursor:pointer; letter-spacing:.1em;
+  }
+  details#textversion{position:fixed; z-index:18; left:14px; top:96px; font-size:.7rem; max-width:260px;
+    background:rgba(250,244,230,.9); border:1px solid var(--line); border-radius:8px; padding:6px 10px}
+  details#textversion summary{cursor:pointer; color:var(--ink2); font-style:italic}
+  details#textversion p{margin-top:6px; line-height:1.5; color:var(--ink2)}
+
+  @media (max-width:640px){
+    #panel{max-height:170px} #flap{bottom:172px} #hint{display:none}
+    header .titles h1{font-size:.85rem}
+  }
+</style>
+</head>
+<body>
+
+<div id="loader">
+  <div class="book"></div>
+  <h1>FÁBRICA VIVA</h1>
+  <h2>Libro interactivo de automatización · Lección 1: El clasificador de cajas</h2>
+  <div class="bar"><i></i></div>
+  <p style="font-size:.72rem;color:var(--ink2)">Abriendo el libro…</p>
+</div>
+
+<header>
+  <div class="titles">
+    <h1>FÁBRICA VIVA · Lección 1</h1>
+    <h2>El clasificador de cajas en una línea de producción</h2>
+  </div>
+  <div id="stamp" title="Sello de la lección">SELLO<br>POR<br>GANAR</div>
+</header>
+
+<div id="statusbar">
+  <span>📦 <b id="cTotal">0</b> procesadas</span>
+  <span>🟦 <b id="cDiv">0</b> desviadas</span>
+  <span>🟨 <b id="cPass">0</b> continuaron</span>
+  <span>🎯 <b id="cPred">0</b> predicciones correctas</span>
+  <span class="state" id="stateTxt">Estado: <b>Observando la línea</b></span>
+</div>
+
+<div id="scene"></div>
+<div id="grain"></div>
+<div id="hint">arrastra para orbitar · rueda para zoom · haz clic en la caja fantasma</div>
+
+<details id="textversion">
+  <summary>Versión en texto (accesibilidad)</summary>
+  <p>Una banda transportadora mueve cajas de altura variable. Un fotorreceptor S1 mide la altura de cada caja y la compara con un umbral ajustable. El PLC activa el brazo expulsor B1 solo si altura &gt; umbral, desviando la caja a la canasta lateral. Las demás continúan hasta el final de la banda. Flujo pedagógico: Predice → Observa → Pon a prueba → Levanta la solapa → Gana el sello.</p>
+</details>
+
+<div id="toast"></div>
+
+<div id="panel">
+  <p class="lesson"><b>Cómo funciona:</b> la banda mueve cajas de distinta altura. El sensor <b>S1</b> mide cada caja y el <b>PLC</b> compara con el umbral: si la altura lo supera, el brazo <b>B1</b> la expulsa a la canasta. Ajusta el umbral, predice, y observa si el sistema coincide contigo.</p>
+  <div class="controls">
+    <button class="primary" id="btnSpawn">📦 Lanzar caja</button>
+    <button id="btnBatch">📚 Lanzar lote (5)</button>
+    <button class="accent" id="btnPredict">🔮 Modo predicción</button>
+    <button class="flap" id="btnFlap">LEVANTAR SOLAPA ▲</button>
+    <button id="btnReset">↺ Reiniciar</button>
+    <div class="sliders">
+      <label>Umbral <input type="range" id="slThresh" min="0.6" max="2" step="0.05" value="1.2"> <b id="lblThresh">1.20</b> u</label>
+      <label>Velocidad <input type="range" id="slSpeed" min="0.5" max="3" step="0.1" value="1.6"> <b id="lblSpeed">1.6</b> u/s</label>
+    </div>
+  </div>
+  <div id="predictbox">
+    <b>Predicción:</b> la próxima caja mide <b id="pH">—</b> u y el umbral es <b id="pT">—</b> u.
+    ¿Será <b>desviada</b> por el brazo o <b>continuará</b> por la banda?
+    <div class="pbtns">
+      <button id="btnPDiv">→ Será DESVIADA</button>
+      <button id="btnPPass">→ CONTINUARÁ</button>
+    </div>
+  </div>
+</div>
+
+<div id="flapHandle">◀ SOLAPA</div>
+
+<div id="flap">
+  <button class="closeflap" id="btnCloseFlap">✕</button>
+  <h3>🔍 Bajo la solapa: la lógica del clasificador</h3>
+  <p>Esto que ves moverse no es magia: es un <b>bucle de control</b> que se repite miles de veces por segundo en toda fábrica real.</p>
+  <h4>El principio físico</h4>
+  <p>El sensor mide la altura <i>h</i> de cada caja. La decisión del PLC es una simple comparación:</p>
+  <div class="formula">h<sub>caja</sub> &gt; h<sub>umbral</sub> &nbsp;⇒&nbsp; activar brazo B1</div>
+  <p>Y para que el brazo no llegue tarde, el PLC calcula el <b>retardo de sincronización</b>: como la caja viaja a velocidad <i>v</i> y hay una distancia <i>d</i> entre el sensor y el brazo:</p>
+  <div class="formula">t<sub>espera</sub> = d<sub>S1→B1</sub> / v<sub>banda</sub></div>
+  <p>Con <i>d = 6 u</i> y <i>v = 1.6 u/s</i>, el PLC espera <b>3.75 s</b>… pero en una fábrica real, con <i>d = 0.9 m</i> y <i>v = 0.3 m/s</i>, serían <b>3 s</b>. Cambia la velocidad en el panel y observa cómo el pulso luminoso viaja justo a tiempo.</p>
+  <h4>Código real: diagrama escalera (ladder) del PLC</h4>
+  <pre>|  S1(h &gt; TH)        B1_SOLICITA
+|——] [——] [———————————( )——|
+
+|  B1_SOLICITA  TON[T#t_esp]
+|——] [—————————————(TON)——|  // espera d/v
+
+|  TON.DN                   B1
+|——] [—————————————————————( )——|  // extiende brazo
+
+/* Pseudocódigo equivalente */
+IF sensor.altura > umbral:
+    esperar(d_sensor_brazo / v_banda)
+    brazo_B1.extender(0.5 s)
+    contador_desviadas += 1</pre>
+  <h4>Por qué tu predicción importa</h4>
+  <ul>
+    <li>Predijiste <b>antes</b> de ver el resultado: eso es exactamente lo que hace un ingeniero al calibrar un sistema.</li>
+    <li>Si fallaste, pregunta: ¿confundiste el umbral, o el sensor midió otra cosa?</li>
+    <li>Gana <b>3 predicciones correctas</b> con al menos <b>10 cajas procesadas</b> para tu sello de «Ingeniero de Línea».</li>
+  </ul>
+</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.169.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============ UI helpers ============ */
+const $ = id => document.getElementById(id);
+let toastT;
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+function setState(txt,cls=''){ const s=$('stateTxt');
+  s.innerHTML='Estado: <b>'+txt+'</b>'; s.className='state '+cls; }
+
+/* ============ Scene ============ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf2e9d8);
+scene.fog = new THREE.Fog(0xf2e9d8, 26, 60);
+
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, .1, 200);
+camera.position.set(-14, 11, 16);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+$('scene').appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1.5,0);
+controls.enableDamping = true; controls.dampingFactor = .06;
+controls.maxPolarAngle = Math.PI*0.49; controls.minDistance = 8; controls.maxDistance = 45;
+
+/* Lights — soft cinematic */
+scene.add(new THREE.AmbientLight(0xfff4e0, .55));
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.15);
+sun.position.set(10,18,8); sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-18; sun.shadow.camera.right=18;
+sun.shadow.camera.top=18; sun.shadow.camera.bottom=-10;
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0xcfe8ff, .35); rim.position.set(-12,8,-10); scene.add(rim);
+
+/* ============ Book-page ground ============ */
+const pageMat = new THREE.MeshStandardMaterial({color:0xefe4cd, roughness:.95});
+const page = new THREE.Mesh(new THREE.PlaneGeometry(90,70), pageMat);
+page.rotation.x = -Math.PI/2; page.position.y=-.9; page.receiveShadow = true;
+scene.add(page);
+// subtle drawn "spine" line of the book
+const spineMat = new THREE.LineBasicMaterial({color:0x2a2620, transparent:true, opacity:.18});
+const spine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+  [new THREE.Vector3(0,0,-35), new THREE.Vector3(0,0,35)]), spineMat);
+spine.position.y=-.89; scene.add(spine);
+
+/* Ink edge helper */
+const inkMat = new THREE.LineBasicMaterial({color:0x2a2620, transparent:true, opacity:.85});
+function inkEdges(geo, opacity=.9){
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20),
+    new THREE.LineBasicMaterial({color:0x2a2620, transparent:true, opacity}));
+  return e;
+}
+
+/* ============ Conveyor belt ============ */
+const BELT_LEN = 26, BELT_W = 2.6, SENSOR_X = -5, ARM_X = 1, END_X = 13;
+const belt = new THREE.Group();
+const beltBody = new THREE.Mesh(
+  new THREE.BoxGeometry(BELT_LEN, .35, BELT_W),
+  new THREE.MeshStandardMaterial({color:0x33313b, roughness:.8}));
+beltBody.position.y = -.35; beltBody.castShadow = beltBody.receiveShadow = true;
+belt.add(beltBody, inkEdges(beltBody.geometry).translateY(-.35));
+const legsG = new THREE.BoxGeometry(.25,1.1,.25);
+const legMat = new THREE.MeshStandardMaterial({color:0x6b6252, roughness:.7});
+for(let x=-BELT_LEN/2+1.5; x<BELT_LEN/2; x+=5){
+  for(const z of [-1,1]){
+    const leg = new THREE.Mesh(legsG, legMat); leg.position.set(x,-1.15,z*(BELT_W/2-.4));
+    leg.castShadow=true; belt.add(leg);
+  }
+}
+// moving rollers illusion: dashes on belt
+const dashMat = new THREE.MeshBasicMaterial({color:0xd8c9a8});
+const dashes=[];
+for(let i=0;i<18;i++){
+  const d = new THREE.Mesh(new THREE.BoxGeometry(.5,.02,.12), dashMat);
+  d.position.set(-BELT_LEN/2 + i*(BELT_LEN/18), -.16, 0);
+  belt.add(d); dashes.push(d);
+}
+scene.add(belt);
+
+/* ============ Sensor arch S1 ============ */
+const sensor = new THREE.Group();
+const postMat = new THREE.MeshStandardMaterial({color:0xc9b98f, roughness:.6});
+const p1 = new THREE.Mesh(new THREE.BoxGeometry(.28,3.4,.28), postMat);
+p1.position.set(0,1.7,-1.9); p1.castShadow=true;
+const p2 = p1.clone(); p2.position.z = 1.9;
+const top = new THREE.Mesh(new THREE.BoxGeometry(.28,.28,4.1), postMat);
+top.position.set(0,3.4,0); top.castShadow=true;
+sensor.add(p1,p2,top, inkEdges(p1.geometry).translateZ(-1.9).translateY(1.7));
+// sensor head with lamp
+const head = new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.7),
+  new THREE.MeshStandardMaterial({color:0x2a2620, roughness:.4}));
+head.position.set(0,3,.9); head.castShadow=true;
+const lampMat = new THREE.MeshBasicMaterial({color:0x888888});
+const lamp = new THREE.Mesh(new THREE.SphereGeometry(.12,12,12), lampMat);
+lamp.position.set(0,3.35,.9);
+sensor.add(head,lamp);
+// measuring beam
+const beamMat = new THREE.MeshBasicMaterial({color:0x2ec4b6, transparent:true, opacity:.16});
+const beam = new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,4.0,8), beamMat);
+beam.position.set(0,1.5,.0);
+sensor.add(beam);
+sensor.position.set(SENSOR_X,0,0);
+scene.add(sensor);
+
+/* ============ PLC cabinet ============ */
+const plc = new THREE.Group();
+const cab = new THREE.Mesh(new THREE.BoxGeometry(2,2.6,1.2),
+  new THREE.MeshStandardMaterial({color:0x8d8271, roughness:.6}));
+cab.position.y=1.3; cab.castShadow=true;
+plc.add(cab, inkEdges(cab.geometry).translateY(1.3));
+const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.4,.7),
+  new THREE.MeshBasicMaterial({color:0x1a2e2c}));
+screen.position.set(0,1.8,.62); plc.add(screen);
+const plcLampMat = new THREE.MeshBasicMaterial({color:0x777777});
+const plcLamp = new THREE.Mesh(new THREE.SphereGeometry(.1,10,10), plcLampMat);
+plcLamp.position.set(.6,2.4,.62); plc.add(plcLamp);
+// floating label
+function makeLabel(text, color=0x2a2620, scale=1){
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const g = c.getContext('2d');
+  g.font = 'italic 34px Georgia'; g.fillStyle = '#'+new THREE.Color(color).getHexString();
+  g.textAlign='center'; g.textBaseline='middle'; g.fillText(text,128,32);
+  const tex = new THREE.CanvasTexture(c);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true}));
+  s.scale.set(2.6*scale,.65*scale,1); return s;
+}
+const lblPlc = makeLabel('PLC', 0x5a5244, .8); lblPlc.position.set(0,3.3,0); plc.add(lblPlc);
+plc.position.set(-2,0,-6); plc.rotation.y=.15;
+scene.add(plc);
+
+/* ============ Pusher arm B1 ============ */
+const arm = new THREE.Group();
+const base = new THREE.Mesh(new THREE.BoxGeometry(1.6,1.2,1.2),
+  new THREE.MeshStandardMaterial({color:0x8d8271, roughness:.6}));
+base.position.set(ARM_X,.6,-2.8); base.castShadow=true;
+const rodMat = new THREE.MeshStandardMaterial({color:0x2a2620, roughness:.4, metalness:.3});
+const rod = new THREE.Mesh(new THREE.BoxGeometry(.9,.9,2.4), rodMat);
+rod.position.set(ARM_X,1.05,-1.4); rod.castShadow=true;
+const plate = new THREE.Mesh(new THREE.BoxGeometry(1.5,1.5,.15),
+  new THREE.MeshStandardMaterial({color:0xe0762c, roughness:.5}));
+plate.position.set(ARM_X,1.05,-.15); plate.castShadow=true;
+arm.add(base,rod,plate, inkEdges(rod.geometry).translateX(ARM_X).translateY(1.05).translateZ(-1.4));
+const lblArm = makeLabel('B1 · brazo',0xa33327,.7); lblArm.position.set(ARM_X,2.6,-1.2); arm.add(lblArm);
+scene.add(arm);
+let armT = 0; // 0 retracted → 1 extended
+
+/* ============ Bin (canasta) ============ */
+const bin = new THREE.Group();
+const binBody = new THREE.Mesh(new THREE.BoxGeometry(3.4,1.6,3),
+  new THREE.MeshStandardMaterial({color:0xe9dcc4, roughness:.9}));
+binBody.position.y=.8;
+bin.add(binBody, inkEdges(binBody.geometry).translateY(.8));
+const lblBin = makeLabel('Canasta: desviadas',0x0c7a70,.85);
+lblBin.position.set(0,2.6,0); bin.add(lblBin);
+bin.position.set(ARM_X,0,4); scene.add(bin);
+
+/* ============ Signal lines (glowing paths) ============ */
+function makeFlow(points, color){
+  const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(...p)));
+  const m = new THREE.LineDashedMaterial({color, dashSize:.45, gapSize:.25,
+    transparent:true, opacity:0.15});
+  const line = new THREE.Line(g,m); line.computeLineDistances(); scene.add(line);
+  return {line, mat:m};
+}
+const flowS1 = makeFlow([[SENSOR_X,3,1],[SENSOR_X,3.6,-4],[-2,3.4,-6]], 0x2ec4b6); // sensor→PLC
+const flowPLC = makeFlow([[-1,-6],[ARM_X,-3.5],[ARM_X,1.5,-2.2]], 0xf4a53f);     // PLC→arm
+const flowEnd = makeFlow([[END_X,0,0],[END_X+6,0,0],[END_X+8,-2,2]], 0x9a8f7a);  // belt→out
+function pulseFlow(f, strength){ f.mat.opacity = Math.min(.95, f.mat.opacity + strength); }
+
+/* ============ Boxes ============ */
+const boxes = [];
+const boxGeo = new THREE.BoxGeometry(1.6,1,1.6); // unit height scaled
+const nextHeights = [];
+function spawnBox(height, ghost=false){
+  const mat = new THREE.MeshStandardMaterial({
+    color: ghost?0x2ec4b6:0xf7f1e3, roughness:.85,
+    transparent: ghost, opacity: ghost?.35:1 });
+  const m = new THREE.Mesh(boxGeo, mat);
+  m.scale.y = height;
+  m.position.set(-BELT_LEN/2-1.5, height/2-.17, 0);
+  m.castShadow = true;
+  const e = inkEdges(boxGeo,.8); e.scale.y=height; m.add(e);
+  scene.add(m);
+  const b = {mesh:m, h:height, measured:false, divert:false, pushed:false, falling:false, ghost};
+  boxes.push(b);
+  return b;
+}
+function removeBox(b){ scene.remove(b.mesh); b.mesh.material.dispose();
+  b.mesh.children[0].geometry.dispose(); boxes.splice(boxes.indexOf(b),1); }
+
+/* ============ Simulation state ============ */
+const S = {
+  v: 1.6, threshold: 1.2,
+  total:0, div:0, pass:0, predOK:0,
+  predicting:false, ghost:null, pendingH:null,
+  stamp:false
+};
+const randH = ()=> .6 + Math.random()*1.4;
+
+/* ============ Prediction flow ============ */
+function enterPredict(){
+  if(S.predicting) return;
+  S.predicting = true; S.pendingH = randH();
+  S.ghost = spawnBox(S.pendingH, true);
+  $('pH').textContent = S.pendingH.toFixed(2);
+  $('pT').textContent = S.threshold.toFixed(2);
+  $('predictbox').classList.add('show');
+  setState('Prediciendo… la caja fantasma espera tu veredicto','predict');
+  toast('🔮 Modo predicción: la caja fantasma espera tu decisión');
+}
+function resolvePrediction(said){
+  if(!S.predicting) return;
+  const willDiv = S.pendingH > S.threshold;
+  const ok = (said==='div') === willDiv;
+  S.predicting = false;
+  $('predictbox').classList.remove('show');
+  if(S.ghost){ removeBox(S.ghost); S.ghost=null; }
+  const b = spawnBox(S.pendingH); b.prediction = ok ? 1 : -1;
+  S.pendingH = null;
+  if(ok){ S.predOK++; toast('🎯 ¡Predicción correcta! La física está de tu lado.');
+    checkStamp(); }
+  else toast('❌ Predicción fallida: revisa el umbral y vuelve a intentarlo.');
+  setState('Probando tu predicción en la línea…');
+  updateHUD();
+}
+
+/* ============ Stamp ============ */
+function checkStamp(){
+  if(S.stamp) return;
+  if(S.predOK>=3 && S.total>=10){
+    S.stamp = true;
+    const st = $('stamp'); st.classList.add('earned');
+    st.innerHTML = '✦ ING.<br>LÍNEA ✦';
+    toast('🏅 ¡Sello ganado: Ingeniero de Línea!');
+    setState('Sello ganado. ¡Lección dominada!','predict');
+  }
+}
+
+/* ============ HUD ============ */
+function updateHUD(){
+  $('cTotal').textContent=S.total; $('cDiv').textContent=S.div;
+  $('cPass').textContent=S.pass; $('cPred').textContent=S.predOK;
+  $('lblThresh').textContent=S.threshold.toFixed(2);
+  $('lblSpeed').textContent=S.v.toFixed(1);
+}
+
+/* ============ Buttons ============ */
+$('btnSpawn').onclick = ()=>{ spawnBox(randH()); if(!S.predicting) setState('Observando la línea'); };
+$('btnBatch').onclick = ()=>{
+  for(let i=0;i<5;i++) setTimeout(()=>spawnBox(randH()), i*700);
+  toast('📚 Lote de 5 cajas en camino'); setState('Flujo de producción activo');
+};
+$('btnPredict').onclick = enterPredict;
+$('btnPDiv').onclick = ()=>resolvePrediction('div');
+$('btnPPass').onclick = ()=>resolvePrediction('pass');
+$('btnFlap').onclick = ()=>{ $('flap').classList.add('open'); $('flapHandle').style.display='none'; };
+$('btnCloseFlap').onclick = ()=>{ $('flap').classList.remove('open'); $('flapHandle').style.display='block'; };
+$('flapHandle').onclick = ()=>{ $('flap').classList.add('open'); $('flapHandle').style.display='none'; };
+$('btnReset').onclick = ()=>{
+  while(boxes.length) removeBox(boxes[0]);
+  Object.assign(S,{total:0,div:0,pass:0,predOK:0,predicting:false,stamp:false});
+  $('stamp').classList.remove('earned'); $('stamp').innerHTML='SELLO<br>POR<br>GANAR';
+  $('predictbox').classList.remove('show'); $('flap').classList.remove('open');
+  $('flapHandle').style.display='block';
+  setState('Observando la línea'); updateHUD(); toast('↺ Línea reiniciada');
+};
+$('slThresh').oninput = e=>{ S.threshold=+e.target.value; updateHUD();
+  if(S.predicting){ $('pT').textContent=S.threshold.toFixed(2); } };
+$('slSpeed').oninput = e=>{ S.v=+e.target.value; updateHUD(); };
+
+/* Click ghost box in 3D → open predict */
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', e=>{
+  if(!S.ghost) return;
+  ptr.set(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(ptr, camera);
+  if(ray.intersectObject(S.ghost.mesh).length){
+    toast('🔮 Decide en el panel inferior: ¿desviada o continúa?');
+    $('predictbox').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+});
+
+/* ============ Animation loop ============ */
+const clock = new THREE.Clock();
+const HOLD = (ARM_X - SENSOR_X); // distance sensor→arm
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), .05);
+  const t = clock.elapsedTime;
+
+  // belt dashes scroll
+  dashes.forEach(d=>{ d.position.x += S.v*dt; if(d.position.x>BELT_LEN/2) d.position.x -= BELT_LEN; });
+
+  // idle signal shimmer
+  flowS1.mat.opacity = .12 + .06*Math.sin(t*2);
+  flowPLC.mat.opacity = .10 + .05*Math.sin(t*2+1);
+  lamp.material.color.setHex(Math.sin(t*3)>0?0x2ec4b6:0x555555);
+  plcLamp.material.color.setHex(Math.sin(t*2.4)>0?0xf4a53f:0x555555);
+
+  // arm extension easing
+  armT += ((arm.active?1:0)-armT)*Math.min(1,dt*7);
+  rod.position.z = -1.4 + armT*1.6;
+  plate.position.z = -.15 + armT*1.6;
+  arm.active = false;
+
+  for(let i=boxes.length-1;i>=0;i--){
+    const b = boxes[i];
+    if(b.ghost){ // ghost hover at spawn
+      b.mesh.position.y = b.h/2-.17 + .12*Math.sin(t*3);
+      b.mesh.rotation.y = Math.sin(t)*0.06;
+      continue;
+    }
+    if(!b.falling){
+      b.mesh.position.x += S.v*dt;
+      // measure at sensor
+      if(!b.measured && b.mesh.position.x >= SENSOR_X){
+        b.measured = true;
+        pulseFlow(flowS1, .8);
+        beamMat.opacity = .75;
+        b.divert = b.h > S.threshold;
+        b.reachArmAt = SENSOR_X + HOLD; // sync: constant distance
+      }
+      if(b.measured && b.divert && !b.pushed && b.mesh.position.x >= b.reachArmAt){
+        pulseFlow(flowPLC, .9);
+        arm.active = true;
+        b.pushed = true;
+      }
+      if(b.pushed && b.mesh.position.z < 4.2){
+        b.mesh.position.z += 3.2*dt; // pushed sideways
+        b.mesh.position.x = ARM_X;
+        if(b.mesh.position.z >= 4.2){
+          S.div++; S.total++; pulseFlow(flowPLC,.6);
+          if(b.prediction===1) checkStamp();
+          toast(b.prediction===1?'🎯 ¡Correcto! → desviada':
+                b.prediction===-1?'❌ Predijiste mal: fue desviada':'📦 Caja alta → desviada');
+          removeBox(b); updateHUD(); continue;
+        }
+      }
+      if(b.mesh.position.x > END_X){
+        b.falling = true; pulseFlow(flowEnd,.5);
+      }
+    } else {
+      b.mesh.position.x += S.v*dt*.6;
+      b.mesh.position.y -= 3.5*dt;
+      b.mesh.rotation.z -= dt*.8;
+      if(b.mesh.position.y < -3){
+        S.pass++; S.total++;
+        toast(b.prediction===1?'❌ Fue desviada… ¡no! Continuó.':
+              b.prediction===-1?'🎯 ¡Correcto! continuó':'📦 Caja baja → sigue la banda');
+        removeBox(b); updateHUD(); checkStamp(); continue;
+      }
+    }
+  }
+
+  // decay effects
+  beamMat.opacity = Math.max(.16, beamMat.opacity - dt*1.6);
+  [flowS1,flowPLC,flowEnd].forEach(f=> f.mat.opacity = Math.max(f.mat.opacity - dt*.7, .1));
+
+  controls.update();
+  renderer.render(scene,camera);
+}
+updateHUD();
+animate();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* hide loader */
+setTimeout(()=>{ $('loader').classList.add('hide');
+  toast('Bienvenida/o: Predice → Observa → Pon a prueba → Levanta la solapa');
+}, 1600);
+</script>
+</body>
+</html>
